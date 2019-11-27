@@ -11,6 +11,8 @@ from keras.preprocessing.image import ImageDataGenerator
 
 def build_model(img_size=(64, 64), block_num=10):
     print("building model")
+    assert img_size[0] == img_size[1]
+
     if img_size != (64, 64):
         input_layer = keras.Input(shape=(img_size[0], img_size[1], 3), name='input_layer')
         x = Conv2D(64, 3, padding='same')(input_layer)
@@ -152,7 +154,7 @@ def train_pipeline(epochs, batch_size=8, img_size=(64, 64), val_split=0.3, lr=1e
 
     if not visual:
         print("Fitting model")
-        history = model.fit_generator(train_gen, steps_per_epoch=train_size//batch_size, validation_data=val_gen, validation_steps=val_size//batch_size)
+        history = model.fit_generator(train_gen, epochs=epochs, steps_per_epoch=train_size//batch_size, validation_data=val_gen, validation_steps=val_size//batch_size)
         print("Done")
 
         model.save(os.path.join(os.getcwd(), "src/dual_model.h5"))
@@ -161,34 +163,63 @@ def train_pipeline(epochs, batch_size=8, img_size=(64, 64), val_split=0.3, lr=1e
         train_steps = train_size // batch_size
         val_steps = val_size // batch_size
 
+        class VisualizeCallback(keras.callbacks.Callback):
+            def on_train_begin(self, logs={}):
+                test_img = cv2.imread(os.path.join(face1_dir, os.listdir(face1_dir)[0]))
+                test_img = cv2.resize(test_img, img_size)
+                test_img = cv2.cvtColor(test_img, cv2.COLOR_BGR2RGB)
+                self.test_img = np.array([test_img / 255.])
 
-        print("Fitting model")
-        for epoch in range(0, epochs):
-            for train in range(0, int(train_steps)):
-                batch_x, batch_y = next(train_gen)
-                model.train_on_batch(batch_x, batch_y)
-                test = batch_x[-1]
-                sample = np.array([test])
-                pred = model.predict(sample)[0]
-                pred = pred - np.min(pred)
-                pred = pred / np.max(pred)
-                pred = np.array(pred * 255).astype('int8')
-                out = np.concatenate((np.array(test * 255).astype('int8'), pred), axis=1)
-                cv2.imshow('train image', out)
-                cv2.waitKey(1)
-            for val in range(0, int(val_steps)):
-                batch_x, batch_y = next(val_gen)
-                model.train_on_batch(batch_x, batch_y)
-                test = batch_x[-1]
-                sample = np.array([test])
-                pred = model.predict(sample)[0]
-                pred = pred - np.min(pred)
-                pred = pred / np.max(pred)
-                pred = np.array(pred * 255).astype('int8')
-                out = np.concatenate((np.array(test * 255).astype('int8'), pred), axis=1)
-                cv2.imshow('train image', out)
+            def on_batch_end(self, batch, logs={}):
+                pred = self.model.predict(self.test_img)[0]
+                output_og = np.array(self.test_img[0] * 255).astype('int8')
+                output_pred = pred - np.min(pred)
+                output_pred = output_pred / np.max(output_pred)
+                output_pred = np.array(output_pred * 255).astype('int8')
+
+                output = np.concatenate((output_og, output_pred), axis=1)
+                cv2.imshow("train image", output)
                 cv2.waitKey(1)
 
+            def on_train_end(self, logs={})
+
+
+        callbacks = [VisualizeCallback()]
+        history = model.fit_generator(train_gen,
+                                      epochs=epochs,
+                                      steps_per_epoch=train_size//batch_size,
+                                      validation_data=val_gen,
+                                      validation_steps=val_size//batch_size,
+                                      callbacks=callbacks)
+
+        # print("Fitting model")
+        # for epoch in range(0, epochs):
+        #     for train in range(0, int(train_steps)):
+        #         batch_x, batch_y = next(train_gen)
+        #         model.train_on_batch(batch_x, batch_y)
+        #         test = batch_x[-1]
+        #         sample = np.array([test])
+        #         pred = model.predict(sample)[0]
+        #         pred = pred - np.min(pred)
+        #         pred = pred / np.max(pred)
+        #         pred = np.array(pred * 255).astype('int8')
+        #         out = np.concatenate((np.array(test * 255).astype('int8'), pred), axis=1)
+        #         cv2.imshow('train image', out)
+        #         cv2.waitKey(1)
+        #     for val in range(0, int(val_steps)):
+        #         batch_x, batch_y = next(val_gen)
+        #         model.train_on_batch(batch_x, batch_y)
+        #         test = batch_x[-1]
+        #         sample = np.array([test])
+        #         pred = model.predict(sample)[0]
+        #         pred = pred - np.min(pred)
+        #         pred = pred / np.max(pred)
+        #         pred = np.array(pred * 255).astype('int8')
+        #         out = np.concatenate((np.array(test * 255).astype('int8'), pred), axis=1)
+        #         cv2.imshow('train image', out)
+        #         cv2.waitKey(1)
+
+        cv2.destroyAllWindows()
         print("Done")
 
         model.save(os.path.join(os.getcwd(), "src/dual_model.h5"))

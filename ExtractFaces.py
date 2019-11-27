@@ -27,11 +27,11 @@ def extract_face(img, detector, output_size=(64, 64)):
     max_y = np.max(pts[:,1])
     min_y = np.min(pts[:,1])
 
-    max_x += .5 * (max_x - min_x)
-    min_x -= .5 * (max_x - min_x)
+    max_x += .3 * (max_x - min_x)
+    min_x -= .3 * (max_x - min_x)
 
-    max_y += .5 * (max_y - min_y)
-    min_y -= .5 * (max_y - min_y)
+    max_y += .3 * (max_y - min_y)
+    min_y -= .3 * (max_y - min_y)
 
     og_pts = np.array([[max_x, min_y], [max_x, max_y], [min_x, max_y], [min_x, min_y]], np.float32)
     warped = np.array([[output_size[0], 0], [output_size[0], output_size[1]], [0, output_size[1]], [0, 0]], np.float32)
@@ -39,6 +39,12 @@ def extract_face(img, detector, output_size=(64, 64)):
     M = cv2.getPerspectiveTransform(og_pts, warped)
 
     output = cv2.warpPerspective(img, M, output_size)
+
+    # (x, y, w, h) = faces[0]['box']
+    #
+    # cropped = img[y:y+h, x:x+w]
+    #
+    # output = cv2.resize(cropped, output_size)
 
     return output
 
@@ -76,6 +82,7 @@ def loop_video(src, out, target_size=(64, 64), max_frames=None, show_frame=False
                 print("{0} frames processed, exiting".format(max_frames))
                 return
 
+    cv2.destroyAllWindows()
     return counter
 
 
