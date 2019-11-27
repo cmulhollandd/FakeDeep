@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 import cv2
+import argparse
 from mtcnn.mtcnn import MTCNN
 
 def extract_face(img, detector, output_size=(64, 64)):
@@ -95,13 +96,8 @@ def format_dirs():
     current = os.getcwd()
 
     faces = os.path.join(current, 'faces')
-    # os.mkdir(faces)
     face1 = os.path.join(faces, "face1")
-    # os.mkdir(face1)
     face2 = os.path.join(faces, "face2")
-    # os.mkdir(face2)
-    # os.mkdir(os.path.join(face2, "face"))
-    # os.mkdir(os.path.join(face1, "face"))
 
     try:
         os.mkdir(faces)
@@ -115,14 +111,27 @@ def format_dirs():
 
 
 def main():
-    args = sys.argv
+    parser = argparse.ArgumentParser()
+    parser.add_argument('source', type=str, nargs=2, default='', help='paths to source videos')
+    parser.add_argument('-s', '--size', type=int, default=64, help='target size for extracted images')
+    parser.add_argument('-f', '--frames', type=int, default=None, help='max number of frames to extract faces from')
+    parser.add_argument('-v', '--visualize', type=int, default=0, help='visualize processing (0=no 1=yes)')
+
+    args = parser.parse_args()
+
+    print(args)
+
+    visualize = False
+    if args.visualize == 1:
+        visualize = True
+
 
     format_dirs()
 
-    input_paths = [args[1], args[2]]
-    max_frames = int(args[3])
-
-    process_videos(input_paths, target_size=(128, 128), max_frames=max_frames, show_frame=True )
+    process_videos(args.source,
+                    target_size=(args.size, args.size),
+                    max_frames=args.frames,
+                    show_frame=visualize)
 
 
 if __name__ == "__main__":

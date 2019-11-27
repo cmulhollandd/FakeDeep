@@ -3,6 +3,7 @@ import sys
 import numpy as np
 import keras
 import cv2
+import argparse
 from keras.layers import *
 from keras.optimizers import Adamax, RMSprop
 from keras.models import Sequential, Model, load_model, model_from_json
@@ -131,49 +132,32 @@ def face_generator(face1_dir, face2_dir, batch_size=8, target_size=(64, 64), val
         yield (np.array([batch_y, batch_y]))
 
 def train_pipeline(epochs, batch_size=8, img_size=(64, 64), val_split=0.3, lr=1e-2, loss='mse', visual=False):
+    model = None
+    if img_size != (64, 64):
+        model = build_model(img_size)
+    else:
+        model = build_model()
+
+    optimizer = Adamax(lr=lr, decay=lr/(epochs * .5))
+    model.compile(loss=loss, optimizer=optimizer)
+
+    face1_dir = os.path.join(os.getcwd(), "faces/face1/face")
+    face2_dir = os.path.join(os.getcwd(), "faces/face2/face")
+
+    val_size = int((len(os.listdir(face1_dir)) + len(os.listdir(face2_dir))) * val_split)
+    train_size = (val_size / val_split) * (1 - val_split)
+
+    train_gen = face_generator(face1_dir, face2_dir, subset='train', target_size=img_size, batch_size=batch_size, val_split=val_split)
+    val_gen = face_generator(face1_dir, face2_dir, subset='val', val_split=val_split, batch_size=batch_size, target_size=img_size)
+
     if not visual:
-        model = None
-        if img_size != (64, 64):
-            model = build_model(img_size)
-        else:
-            model = build_model()
-
-        optimizer = Adamax(lr=lr, decay=lr/(epochs * .5))
-        model.compile(loss=loss, optimizer=optimizer)
-
-        face1_dir = os.path.join(os.getcwd(), "faces/face1/face")
-        face2_dir = os.path.join(os.getcwd(), "faces/face2/face")
-
-        val_size = int((len(os.listdir(face1_dir)) + len(os.listdir(face2_dir))) * val_split)
-        train_size = (val_size / val_split) * (1 - val_split)
-
-        train_gen = face_generator(face1_dir, face2_dir, subset='train', target_size=img_size, batch_size=batch_size, val_split=val_split)
-        val_gen = face_generator(face1_dir, face2_dir, subset='val', val_split=val_split, batch_size=batch_size, target_size=img_size)
-
         print("Fitting model")
         history = model.fit_generator(train_gen, steps_per_epoch=train_size//batch_size, validation_data=val_gen, validation_steps=val_size//batch_size)
         print("Done")
 
         model.save(os.path.join(os.getcwd(), "src/dual_model.h5"))
+
     else:
-        model = None
-        if img_size != (64, 64):
-            model = build_model(img_size)
-        else:
-            model = build_model()
-
-        optimizer = Adamax(lr=lr, decay=lr/(epochs * .5))
-        model.compile(loss=loss, optimizer=optimizer)
-
-        face1_dir = os.path.join(os.getcwd(), "faces/face1/face")
-        face2_dir = os.path.join(os.getcwd(), "faces/face2/face")
-
-        val_size = int((len(os.listdir(face1_dir)) + len(os.listdir(face2_dir))) * val_split)
-        train_size = (val_size / val_split) * (1 - val_split)
-
-        train_gen = face_generator(face1_dir, face2_dir, subset='train', target_size=img_size, batch_size=batch_size, val_split=val_split)
-        val_gen = face_generator(face1_dir, face2_dir, subset='val', val_split=val_split, batch_size=batch_size, target_size=img_size)
-
         train_steps = train_size // batch_size
         val_steps = val_size // batch_size
 
@@ -210,4 +194,24 @@ def train_pipeline(epochs, batch_size=8, img_size=(64, 64), val_split=0.3, lr=1e
         model.save(os.path.join(os.getcwd(), "src/dual_model.h5"))
 
 if __name__ == "__main__":
-    train_pipeline(10, batch_size=1, img_size=(128, 128), val_split=.2, lr=1e-3, visual=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-e', '--epochs', type=int, default=15, help='epochs for training')
+    parser.add_argument('-b', '--batch', type=int, default=8, help='batch size for training')
+    parser.add_argument('--split', type=float, default=.3, help='validation split for data')
+    parser.add_argument('-s', '--size', type=int, default='64', help='image size for training (make sure this is correct)')
+    parser.add_argument('-r', '--rate', type=float, default=1e-3, help='learning rate for training')
+    parser.add_argument('-v', '--visualize', type=int, default=0, help='show training process')
+
+    args = parser.parse_args()
+
+    visualize = False
+    if args.visualize == 1:
+        visualize = True
+
+
+    train_pipeline(args.epochs,
+                    batch_size=args.batch,
+                    img_size=(args.size, args.size),
+                    val_split=args.split,
+                    lr=args.rate,
+                    visual=visualize)
