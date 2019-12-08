@@ -1,0 +1,6 @@
+# don't commit faces dir
+faces/
+
+# don't commit .h5 or .json files
+src/*.h5
+src/*.json
