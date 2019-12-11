@@ -5,226 +5,271 @@ import keras
 import cv2
 import argparse
 import keras.backend as K
+import tensorflow as tf
 from keras.layers import *
-from keras.optimizers import Adamax, RMSprop, SGD
+from keras.optimizers import Adamax, RMSprop
 from keras.models import Sequential, Model, load_model, model_from_json
-from keras.preprocessing.image import ImageDataGenerator
 
-def build_model(img_size=(64, 64), latent_dim=4):
-    print("building model")
-    assert img_size[0] == img_size[1] # images should be square
+def SubpixelConv2D(input_shape, scale=4, name=None):
+        def subpixel_shape(input_shape):
+            dims = [input_shape[0],
+                    input_shape[1] * scale,
+                    input_shape[2] * scale,
+                    int(input_shape[3] / (scale ** 2))]
+            output_shape = tuple(dims)
+            return output_shape
+
+        def subpixel(x):
+            return tf.depth_to_space(x, scale)
+
+        return Lambda(subpixel, output_shape=subpixel_shape, name=name)
+
+def build_encoder(img_size=(64, 64)):
+    print("\nBuilding Encoder")
     img_input = keras.Input(shape=(img_size[0], img_size[1], 3), name='encoder_input')
 
-    x = Conv2D(16, 3, activation='relu', padding='same', strides=(2, 2))(img_input)
-    x = Conv2D(16, 3, activation='relu', padding='same')(x)
-    x = Conv2D(16, 3, activation='relu', padding='same')(x)
-    x = BatchNormalization()(x)
-
-    x = Conv2D(32, 3, activation='relu', padding='same', strides=(2, 2))(x)
-    x = Conv2D(32, 3, activation='relu', padding='same')(x)
-    x = Conv2D(32, 3, activation='relu', padding='same')(x)
-    x = BatchNormalization()(x)
-
-    x = Conv2D(64, 3, activation='relu', padding='same', strides=(2, 2))(x)
-    x = Conv2D(64, 3, activation='relu', padding='same')(x)
-    x = Conv2D(64, 3, activation='relu', padding='same')(x)
-    x = BatchNormalization(name='final')(x)
+    x = Conv2D(64, 5, padding='same', strides=(2, 2))(img_input)
+    x = LeakyReLU()(x)
+    x = Conv2D(128, 5, padding='same', strides=(2, 2))(x)
+    x = LeakyReLU()(x)
+    x = Conv2D(256, 5, padding='same', strides=(2, 2))(x)
+    x = LeakyReLU()(x)
+    x = Conv2D(512, 5, padding='same', strides=(2, 2))(x)
+    x = LeakyReLU()(x)
 
     shape_before_flatten = K.int_shape(x)
     x = Flatten()(x)
+    x = Dense(512)(x)
+    x = Dense(np.prod(shape_before_flatten[1:]))(x)
 
-    x = Dense(128, activation='relu')(x)
-    x = Dense(64, activation='softmax', name='codings')(x)
-    x = Dense(128, activation='relu')(x)
-
-    x = Dense(np.prod(shape_before_flatten[1:]), activation='relu')(x)
     x = Reshape(shape_before_flatten[1:])(x)
+    x = Conv2D(1024, 3, padding='same')(x)
+    x = SubpixelConv2D(img_size, scale=2, name='encoder_output')(x)
+    
+    encoder = Model(img_input, x, name='encoder')
+    print("Done\n")
+    return encoder
 
-    x = BatchNormalization()(x)
-    x = Conv2D(64, 3, padding='same', activation='relu')(x)
-    x = Conv2D(64, 3, padding='same', activation='relu')(x)
-    x = Conv2DTranspose(64, 3, padding='same', strides=(2, 2))(x)
+def build_decoder(img_size=(64, 64), input_shape=(None, 0), model_name=None):
+    print('\nBuilding Decoder')
+    img_input = keras.Input(shape=input_shape, name='decoder_input')
+    
+    x = Conv2D(512, 3, padding='same')(img_input)
+    x = LeakyReLU(.1)(x)
+    x = SubpixelConv2D(img_size, scale=2)(x)
+    
+    x = Conv2D(256, 3, padding='same')(x)
+    x = LeakyReLU(.1)(x)
+    x = SubpixelConv2D(img_size, scale=2)(x)
+    x = Conv2D(128, 3, padding='same')(x)
+    x = LeakyReLU(.1)(x)
+    x = SubpixelConv2D(img_size, scale=2)(x)
+    x = Conv2D(64, 3, padding='same')(x)
+    x = LeakyReLU(.1)(x)
+    # x = SubpixelConv2D(img_size, scale=2)(x)
 
-    x = BatchNormalization()(x)
-    x = Conv2D(32, 3, padding='same', activation='relu')(x)
-    x = Conv2D(32, 3, padding='same', activation='relu')(x)
-    x = Conv2DTranspose(32, 3, padding='same', strides=(2, 2))(x)
+    x = Conv2D(3, 5, padding='same', activation='sigmoid')(x)
+    
+    decoder = Model(img_input, x, name=model_name)
+    print("Done\n")
+    return decoder
 
-    x = BatchNormalization()(x)
-    x = Conv2D(16, 3, padding='same', activation='relu')(x)
-    x = Conv2D(16, 3, padding='same', activation='relu')(x)
-    x = Conv2DTranspose(16, 3, padding='same', strides=(2, 2))(x)
+def build_model(img_size=(64, 64)):
+    print("building model")
+    assert img_size[0] == img_size[1] # images should be square
 
-    x = Conv2D(3, 1, padding='same')(x)
+    encoder = build_encoder(img_size=img_size)
+    
+    coding_shape = K.int_shape(encoder.get_layer('encoder_output').output)[1:]
+    
+    decoder_a = build_decoder(img_size=img_size, input_shape=coding_shape, model_name='decoder_a')
+    decoder_b = build_decoder(img_size=img_size, input_shape=coding_shape, model_name='decoder_b')
+    
+    ae_a = Sequential(name='ae_a')
+    ae_a.add(encoder)
+    ae_a.add(decoder_a)
+    
+    ae_b = Sequential(name='ae_b')
+    ae_b.add(encoder)
+    ae_b.add(decoder_b)
+    
+    encoder.summary()
+    decoder_a.summary()    
+    ae_a.summary()
+    
+    return (ae_a, ae_b)
 
-    model = Model(img_input, x)
-    model.summary()
-    return model
-
-def face_generator(face1_dir,
-                   face2_dir,
-                   batch_size=8,
-                   target_size=(64, 64),
-                   val_split=0.3,
-                   subset='none'):
-    face1_imgs = os.listdir(face1_dir)
-    face2_imgs = os.listdir(face2_dir)
-    faces = []
-
-    for path in face1_imgs:
-        faces.append(os.path.join(face1_dir, path))
-    # for path in face2_imgs:
-    #     faces.append(os.path.join(face2_dir, path))
-
-    paths = np.array(faces)
-    np.random.shuffle(paths)
-    faces = paths.tolist()
-    if subset == 'none':
-        print()
-    elif subset == 'train':
-        faces = faces[int(val_split * len(faces)):]
-    elif subset == 'val':
-        faces = faces[:int(val_split * len(faces))]
-    paths = np.array(faces)
-    np.random.shuffle(paths)
-    num_faces = paths.shape[0]
-    print("Found {0} faces for {1}".format(num_faces, subset))
-    batch_counter = 0
-    while True:
-        batch_paths = []
-        if batch_counter + batch_size > num_faces:
-            batch_paths = faces[batch_counter:]
-            diff = batch_size - len(batch_paths)
-            batch_paths = np.append(batch_paths, faces[:diff - 1])
-            batch_counter = diff - 1
-        else:
-            batch_paths = faces[batch_counter: batch_counter + batch_size]
-            batch_counter += batch_size
-        batch_y = []
-        for path in batch_paths:
-            img = cv2.imread(path)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img = cv2.resize(img, target_size)
-            img = img / 255.
-            batch_y.append(img)
-        yield (np.array(batch_y), np.array(batch_y))
+class FaceGenerator():
+    def __init__(self, src_dir1, src_dir2, rescale=1./255):
+        face1_imgs = os.listdir(src_dir1)
+        face2_imgs = os.listdir(src_dir2)
+        
+        for i in range(0, len(face1_imgs)):
+            face1_imgs[i] = src_dir1 + "/" + face1_imgs[i]
+            
+        for i in range(0, len(face2_imgs)):
+            face2_imgs[i] = src_dir2 + "/" + face2_imgs[i]
+            
+        face1_imgs = np.array(face1_imgs)
+        face2_imgs = np.array(face2_imgs)
+        
+        np.random.shuffle(face1_imgs)
+        np.random.shuffle(face2_imgs)
+        
+        self.face1_imgs = face1_imgs
+        self.face2_imgs = face2_imgs
+        self.rescale = rescale
+        
+        print(f"Found {face1_imgs.shape[0]} images for face1")
+        print(f"Found {face2_imgs.shape[0]} images for face2")
+        
+    def flow(self, face, target_size=(64, 64), batch_size=8):
+        faces = None
+        if face == '1':
+            faces = self.face1_imgs
+        elif face == '2':
+            faces = self.face2_imgs
+            
+        np.random.shuffle(faces)
+        batch_index = 0
+        num_imgs = faces.shape[0]
+        while True:
+            batch_faces = []
+            if batch_index + batch_size >= num_imgs:
+                batch_faces = faces[batch_index:]
+                diff = batch_size - len(batch_faces)
+                batch_faces = np.concatenate(batch_faces, faces[:diff-1], axis=0)
+                batch_index = diff
+            else:
+                batch_faces = faces[batch_index:batch_index+batch_size]
+            
+            batch_x = []
+            for fname in batch_faces:
+                img = cv2.imread(fname, cv2.COLOR_BGR2RGB)
+                img = cv2.resize(img, target_size)
+                img = img * self.rescale
+                
+                batch_x.append(img)
+                
+            batch_x = np.array(batch_x)            
+            yield batch_x
+        
 
 def train_pipeline(epochs,
                    batch_size=8,
                    img_size=(64, 64),
-                   val_split=0.3,
                    lr=1e-3,
                    loss='mse',
                    visual=False):
-    model = build_model(img_size=img_size, latent_dim=4)
+    
+    ae_a, ae_b = build_model(img_size=img_size)
     optimizer = Adamax(lr=lr, decay=lr/(epochs))
-    model.compile(loss=loss, optimizer=optimizer)
+    ae_a.compile(loss=loss, optimizer=optimizer)
+    ae_b.compile(loss=loss, optimizer=optimizer)
+    
     face1_dir = os.path.join(os.getcwd(), "faces/face1/face")
     face2_dir = os.path.join(os.getcwd(), "faces/face2/face")
-    val_size = int((len(os.listdir(face1_dir)) + len(os.listdir(face2_dir))) * val_split)
-    train_size = (val_size / val_split) * (1 - val_split)
-    print(train_size, val_size)
-    train_gen = face_generator(face1_dir,
-                               face2_dir,
-                               subset='train',
-                               target_size=img_size,
-                               batch_size=batch_size,
-                               val_split=val_split)
-    val_gen = face_generator(face1_dir,
-                             face2_dir,
-                             subset='val',
-                             val_split=val_split,
-                             batch_size=batch_size,
-                             target_size=img_size)
-    if not visual:
-        print("Fitting model")
-        history = model.fit_generator(train_gen, epochs=epochs, steps_per_epoch=train_size//batch_size, validation_data=val_gen, validation_steps=val_size//batch_size)
-        print("Done")
-        model.save(os.path.join(os.getcwd(), "src/dual_model.h5"))
-    else:
-        train_steps = (train_size // batch_size)
-        val_steps = (val_size // batch_size)
-        class VisualizeCallback(keras.callbacks.Callback):
-            def on_train_begin(self, logs={}):
-                test_img2 = cv2.imread(os.path.join(face2_dir, os.listdir(face2_dir)[500]), cv2.COLOR_BGR2RGB)
-                test_img1 = cv2.imread(os.path.join(face1_dir, os.listdir(face1_dir)[500]), cv2.COLOR_BGR2RGB)
-                test_img2 = cv2.resize(test_img2, img_size)
-                test_img1 = cv2.resize(test_img1, img_size)
-                # test_img1 = np.array([test_img1 / 255.]).astype(np.float32)
-                # test_img2 = np.array([test_img2 / 255.]).astype(np.float32)
+    
+    # face1_dir = "/home/ubuntu/deep_learning/FakeDeep/faces/face1/face/"
+    # face2_dir = "/home/ubuntu/deep_learning/FakeDeep/faces/face2/face/"
+    
+    image_gen = FaceGenerator(face1_dir, face2_dir, rescale=1./255)
+    face1_gen = image_gen.flow('1', target_size=img_size, batch_size=batch_size)
+    face2_gen = image_gen.flow('2', target_size=img_size, batch_size=batch_size)
+    
+    face1_steps = image_gen.face1_imgs.shape[0] // batch_size
+    face2_steps = image_gen.face2_imgs.shape[0] // batch_size
+    
+#     class VisualizeCallback(keras.callbacks.Callback):
+#             def __init__(self, model1, model2):
+#                 self.model1 = model
+#                 self.model2 = model
+        
+#             def on_train_begin(self, logs={}):
+#                 test_img1 = cv2.imread(os.path.join(face1_dir, os.listdir(face2_dir)[500]), cv2.COLOR_BGR2RGB)
+#                 test_img2 = cv2.imread(os.path.join(face2_dir, os.listdir(face1_dir)[500]), cv2.COLOR_BGR2RGB)
+#                 test_img1 = cv2.resize(test_img1, img_size)
+#                 test_img2 = cv2.resize(test_img2, img_size)
+                
+#                 self.test_img1 = np.array([test_img1 / 255.])
+#                 self.test_img2 = np.array([test_img2 / 255.])
 
-                test = np.array([test_img1, test_img2])
-                test = (test / 255.).astype(np.float32)
-                self.test = test
+#             def on_epoch_begin(self, epoch, logs={}):
+#                 test_img1 = cv2.imread(os.path.join(face1_dir, os.listdir(face1_dir)[epoch + 1]), cv2.COLOR_BGR2RGB)
+#                 test_img2 = cv2.imread(os.path.join(face2_dir, os.listdir(face2_dir)[epoch + 1]), cv2.COLOR_BGR2RGB)
+#                 test_img1 = cv2.resize(test_img1, img_size)
+#                 test_img2 = cv2.resize(test_img2, img_size)
+#                 self.test_img1 = np.array([test_img1 / 255.]).astype(np.float32)
+#                 self.test_img2 = np.array([test_img2 / 255.]).astype(np.float32)
 
-            def on_epoch_begin(self, epoch, logs={}):
-                test_img1 = cv2.imread(os.path.join(face1_dir, os.listdir(face1_dir)[epoch + 1]), cv2.COLOR_BGR2RGB)
-                test_img2 = cv2.imread(os.path.join(face2_dir, os.listdir(face2_dir)[epoch + 1]), cv2.COLOR_BGR2RGB)
-                test_img1 = cv2.resize(test_img1, img_size)
-                test_img2 = cv2.resize(test_img2, img_size)
-                self.test_img1 = np.array([test_img1 / 255.]).astype(np.float32)
-                self.test_img2 = np.array([test_img2 / 255.]).astype(np.float32)
-                test = np.array([test_img1, test_img2])
-                test = (test / 255.).astype(np.float32)
-                self.test = test
+#             def on_batch_end(self, batch, logs={}):
+#                 pred1 = self.model.predict(self.test_img1)[0]
+#                 pred2 = self.model.predict(self.test_img2)[0]
+#                 output_og1 = np.array(self.test_img1[0] * 255).astype('uint8')
+#                 output_og2 = np.array(self.test_img2[0] * 255).astype('uint8')
 
-            # def on_epoch_end(self, epoch, logs={}):
-            #     if epoch > 4:
-            #         if logs['loss'] - logs['val_loss'] < -0.05:
-            #             self.model.save(os.path.join(os.getcwd(), "src/dual_model.h5"))
-            #             print("not training well, model saved, exiting")
-            #             self.model.stop_training = True
+#                 output_pred1 = pred1 - np.min(pred1)
+#                 output_pred1 = output_pred1 / np.max(output_pred1)
+#                 output_pred1 = np.array(output_pred1 * 255).astype('uint8')
+#                 output_pred1 = cv2.cvtColor(output_pred1, cv2.COLOR_BGR2RGB)
 
-            def on_batch_end(self, batch, logs={}):
-                pred1 = self.model.predict(self.test_img1)[0]
-                pred2 = self.model.predict(self.test_img2)[0]
-                # test = self.test
-                # preds = self.model.predict(test)
-                output_og1 = np.array(self.test_img1[0] * 255).astype('uint8')
-                output_og2 = np.array(self.test_img2[0] * 255).astype('uint8')
-                # preds = preds - np.min(preds)
-                # preds = preds / np.max(preds)
+#                 output_pred2 = pred2 - np.min(pred2)
+#                 output_pred2 = output_pred2 / np.max(output_pred2)
+#                 output_pred2 = np.array(output_pred2 * 255).astype('uint8')
+#                 output_pred2 = cv2.cvtColor(output_pred2, cv2.COLOR_BGR2RGB)
 
-                # preds = np.array(preds * 255.).astype(np.uint8)
-                output_pred1 = pred1 - np.min(pred1)
-                output_pred1 = output_pred1 / np.max(output_pred1)
-                output_pred1 = np.array(output_pred1 * 255).astype('uint8')
-                output_pred1 = cv2.cvtColor(output_pred1, cv2.COLOR_BGR2RGB)
+#                 output2 = np.concatenate((output_og2, output_pred2), axis=1)
+#                 output1 = np.concatenate((output_og1, output_pred1), axis=1)
+                
+#                 output = np.concatenate((output1, output2), axis=0)
+#                 cv2.imshow("train image", output)
+#                 cv2.waitKey(1)
 
-                output_pred2 = pred2 - np.min(pred2)
-                output_pred2 = output_pred2 / np.max(output_pred2)
-                output_pred2 = np.array(output_pred2 * 255).astype('uint8')
-                output_pred2 = cv2.cvtColor(output_pred2, cv2.COLOR_BGR2RGB)
-
-                output2 = np.concatenate((output_og2, output_pred2), axis=1)
-                output1 = np.concatenate((output_og1, output_pred1), axis=1)
-
-                # output1 = np.concatenate((test[0], preds[0]), axis=1)
-                # output2 = np.concatenate((test[1], preds[1]), axis=1)
-
-                output = np.concatenate((output1, output2), axis=0)
-                cv2.imshow("train image", output)
-                cv2.waitKey(1)
-
-        callbacks = [VisualizeCallback()]
-        history = model.fit_generator(train_gen,
-                                      epochs=epochs,
-                                      steps_per_epoch=train_steps,
-                                      validation_data=val_gen,
-                                      validation_steps=val_steps,
-                                      callbacks=callbacks)
-        cv2.destroyAllWindows()
-        print("Done")
-        model.save(os.path.join(os.getcwd(), "src/dual_model.h5"))
-
+    def visualize_output(modela, modelb, facea, faceb):
+        preda = modela.predict(np.array([facea]))[0]
+        predb = modelb.predict(np.array([faceb]))[0]
+    
+        outputs = np.concatenate((preda, predb), axis=0)
+        outputs = outputs - np.min(outputs)
+        outputs = outputs / np.max(outputs)
+    
+        inputs = np.concatenate((facea, faceb), axis=0)
+    
+        final = np.concatenate((inputs, outputs), axis=1)
+    
+        cv2.imshow("training outputs", final)
+        cv2.waitKey(1)
+            
+    print("\nFitting Models\n")
+    total_batches = face1_steps * epochs
+    for batch in range(1, total_batches):
+        face1_imgs = next(face1_gen)
+        face2_imgs = next(face2_gen)
+        a_loss = ae_a.train_on_batch(face1_imgs, face1_imgs)
+        b_loss = ae_b.train_on_batch(face2_imgs, face2_imgs)
+                
+        metrics = "batch %3f / %3f : ae_a loss: %.3f ae_b loss: %.3f \r"%(batch, total_batches, a_loss, b_loss)  
+        
+        print(metrics, end='')
+        
+        if visual:
+            visualize_output(ae_a, ae_b, face1_imgs[0,0], face2_imgs[0,0])
+            
+    current = os.path.dirname(__file__)
+    ae_a.save(os.path.join(current, "src/ae_a.h5"))
+    ae_b.save(os.path.join(current, "src/ae_b.h5"))
+            
+    print("\nDone\n:)")
+        
+        
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-e', '--epochs', type=int, default=15, help='epochs for training')
     parser.add_argument('-b', '--batch', type=int, default=8, help='batch size for training')
-    parser.add_argument('--split', type=float, default=.3, help='validation split for data')
     parser.add_argument('-s', '--size', type=int, default='64', help='image size for training (make sure this is correct)')
     parser.add_argument('-r', '--rate', type=float, default=1e-3, help='learning rate for training')
-    parser.add_argument('-v', '--visualize', type=int, default=0, help='show training process')
+    parser.add_argument('-v', '--visualize', type=int, default=0, help='show training process (0=no 1=yes)')
+    parser.add_argument('-l', '--loss', type=str, default='mae', help='loss function to use (mae, mse, binary_crossentropy)')
     args = parser.parse_args()
     visualize = False
     if args.visualize == 1:
@@ -232,9 +277,8 @@ if __name__ == "__main__":
     train_pipeline(args.epochs,
                     batch_size=args.batch,
                     img_size=(args.size, args.size),
-                    val_split=args.split,
                     lr=args.rate,
-                    loss='mae',
+                    loss=args.loss,
                     visual=visualize)
 
-    # build_model(img_size=(128, 128))
+    # build_model(img_size=(64, 64))

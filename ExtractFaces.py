@@ -3,54 +3,32 @@ import sys
 import numpy as np
 import cv2
 import argparse
-from mtcnn.mtcnn import MTCNN
 
-def extract_face(img, detector, output_size=(64, 64)):
-    faces = detector.detect_faces(img)
+prototxt_path = os.path.join(os.getcwd(), 'extraction_models/deploy.prototxt')
+caffemodel_path = os.path.join(os.getcwd(), 'extraction_models/weights.caffemodel')
+model = cv2.dnn.readNetFromCaffe(prototxt_path, caffemodel_path)
 
-    if len(faces) == 0:
-        return None
+def extract_face(img, output_size=(64, 64)):
+    (h, w) = img.shape[:2]
+    blob = cv2.dnn.blobFromImage(cv2.resize(img, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
+    
+    model.setInput(blob)
+    detections = model.forward()
+    frame = None
+    for i in range(0, detections.shape[2]):
+        box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+        (startX, startY, endX, endY) = box.astype("int")
+        confidence = detections[0, 0, i, 2]
+        
+        if (confidence > 0.5):
+            frame = img[startY:endY, startX:endX]
+            frame = cv2.resize(frame, output_size)
 
-    # keypoints = faces[0]["keypoints"]
-    #
-    # pts = np.zeros((4, 2))
-    #
-    # keys = list(keypoints.keys())
-    # for i in range(0, len(keypoints) - 1):
-    #     pt = keypoints[keys[i]]
-    #     pts[i,0] = pt[0]
-    #     pts[i,1] = pt[1]
-    #
-    #
-    # max_x = np.max(pts[:,0])
-    # min_x = np.min(pts[:,0])
-    # max_y = np.max(pts[:,1])
-    # min_y = np.min(pts[:,1])
-    #
-    # max_x += .3 * (max_x - min_x)
-    # min_x -= .3 * (max_x - min_x)
-    #
-    # max_y += .3 * (max_y - min_y)
-    # min_y -= .3 * (max_y - min_y)
-    #
-    # og_pts = np.array([[max_x, min_y], [max_x, max_y], [min_x, max_y], [min_x, min_y]], np.float32)
-    # warped = np.array([[output_size[0], 0], [output_size[0], output_size[1]], [0, output_size[1]], [0, 0]], np.float32)
-    #
-    # M = cv2.getPerspectiveTransform(og_pts, warped)
-    #
-    # output = cv2.warpPerspective(img, M, output_size)
-
-    (x, y, w, h) = faces[0]['box']
-
-    cropped = img[y:y+h, x:x+w]
-
-    output = cv2.resize(cropped, output_size)
-
-    return output
+    return frame
 
 def loop_video(src, out, target_size=(64, 64), max_frames=None, show_frame=False):
     cap = cv2.VideoCapture(src)
-    detector = MTCNN()
+    #detector = MTCNN()
 
     counter = 0
     while True:
@@ -63,7 +41,7 @@ def loop_video(src, out, target_size=(64, 64), max_frames=None, show_frame=False
         frame = cv2.resize(frame, (640, 360))
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        extracted = extract_face(img, detector, output_size=target_size)
+        extracted = extract_face(img, output_size=target_size)
 
         if extracted is None:
             continue
