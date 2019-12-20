@@ -30,43 +30,43 @@ def build_encoder(img_size=(64, 64)):
     print("\nBuilding Encoder")
     img_input = keras.Input(shape=(img_size[0], img_size[1], 3), name='encoder_input')
 
-    x = Conv2D(64, 5, padding='same', strides=(2, 2))(img_input)
+    x = Conv2D(32, 5, padding='same', strides=(2, 2))(img_input)
+    x = LeakyReLU()(x)
+    x = Conv2D(64, 5, padding='same', strides=(2, 2))(x)
     x = LeakyReLU()(x)
     x = Conv2D(128, 5, padding='same', strides=(2, 2))(x)
     x = LeakyReLU()(x)
     x = Conv2D(256, 5, padding='same', strides=(2, 2))(x)
     x = LeakyReLU()(x)
-    x = Conv2D(512, 5, padding='same', strides=(2, 2))(x)
-    x = LeakyReLU()(x)
 
     shape_before_flatten = K.int_shape(x)
     x = Flatten()(x)
-    x = Dense(512)(x)
+    x = Dense(256)(x)
     x = Dense(np.prod(shape_before_flatten[1:]))(x)
 
     x = Reshape(shape_before_flatten[1:])(x)
-    x = Conv2D(1024, 3, padding='same')(x)
+    x = Conv2D(512, 3, padding='same')(x)
     x = SubpixelConv2D(img_size, scale=2, name='encoder_output')(x)
 
     encoder = Model(img_input, x, name='encoder')
-    print("Done\n")
+    print("Done :)")
     return encoder
 
 def build_decoder(img_size=(64, 64), input_shape=(None, 0), model_name=None):
     print('\nBuilding Decoder')
     img_input = keras.Input(shape=input_shape, name='decoder_input')
 
-    x = Conv2D(512, 3, padding='same')(img_input)
+    x = Conv2D(256, 3, padding='same')(img_input)
     x = LeakyReLU(.1)(x)
     x = SubpixelConv2D(img_size, scale=2)(x)
 
-    x = Conv2D(256, 3, padding='same')(x)
-    x = LeakyReLU(.1)(x)
-    x = SubpixelConv2D(img_size, scale=2)(x)
     x = Conv2D(128, 3, padding='same')(x)
     x = LeakyReLU(.1)(x)
     x = SubpixelConv2D(img_size, scale=2)(x)
     x = Conv2D(64, 3, padding='same')(x)
+    x = LeakyReLU(.1)(x)
+    x = SubpixelConv2D(img_size, scale=2)(x)
+    x = Conv2D(32, 3, padding='same')(x)
     x = LeakyReLU(.1)(x)
     # x = SubpixelConv2D(img_size, scale=2)(x)
 

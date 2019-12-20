@@ -11,7 +11,7 @@ model = cv2.dnn.readNetFromCaffe(prototxt_path, caffemodel_path)
 def extract_face(img, output_size=(64, 64)):
     (h, w) = img.shape[:2]
     blob = cv2.dnn.blobFromImage(cv2.resize(img, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
-    
+
     model.setInput(blob)
     detections = model.forward()
     frame = None
@@ -19,7 +19,7 @@ def extract_face(img, output_size=(64, 64)):
         box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
         (startX, startY, endX, endY) = box.astype("int")
         confidence = detections[0, 0, i, 2]
-        
+
         if (confidence > 0.5):
             frame = img[startY:endY, startX:endX]
             frame = cv2.resize(frame, output_size)
@@ -81,7 +81,7 @@ def process_videos(input_paths, target_size=(64, 64), max_frames=None, show_fram
 def format_dirs():
     current = os.getcwd()
 
-    faces = os.path.join(current, 'faces')
+    faces = os.path.join(current, 'faces2')
     face1 = os.path.join(faces, "face1")
     face2 = os.path.join(faces, "face2")
 
