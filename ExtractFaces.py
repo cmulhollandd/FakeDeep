@@ -28,8 +28,6 @@ def extract_face(img, output_size=(64, 64)):
 
 def loop_video(src, out, target_size=(64, 64), max_frames=None, show_frame=False):
     cap = cv2.VideoCapture(src)
-    #detector = MTCNN()
-
     counter = 0
     while True:
         ret, frame = cap.read()
