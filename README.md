@@ -1,5 +1,5 @@
 # FakeDeep
-## A kinda shitty deepfake implementation
+## A sort of terrible deepfake implementation
 ***
 This isn't really gonna work that well so theres probably no point but whatever
 
